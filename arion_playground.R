@@ -2,6 +2,7 @@
 library(data.table)
 library(corrplot)
 library(ggplot2)
+library(glmulti)
 
 # load data
 data = setDT(read.csv("Life Expectancy Data.csv"))
@@ -23,11 +24,27 @@ head(data)
 
 # EDA ---------------------------------------------------------------------
 
+# target variable
+ggplot(data, aes(x = Life.expectancy)) +
+  geom_histogram(fill = "aquamarine4", colour = "white") +
+  geom_vline(xintercept = quantile(data$Life.expectancy, 0.5), linetype = "dashed", colour = "red", size = 1) +
+  annotate("text", x = quantile(data$Life.expectancy, 0.5) - 3, y = 400, label = "Median", colour = "red") +
+  theme_minimal() +
+  labs(x = "Life Expectancy", y = "Count", title = "Life expectancy distribution")
+
 # correlation
 corr = cor(data[, c(2,4:22)], use = "complete.obs")
 corrplot(corr, type = "lower")
 
+
 # status
+ggplot(data[, length(unique(Country)), Status], aes(x = Status, y = V1)) +
+  geom_bar(stat = "identity", fill = "aquamarine4") +
+  theme_minimal() +
+  labs(y = "Countries", title = "Distribution of countries by status")
+  
+
+# status vs expectancy
 ggplot(data, aes(x = Status, y = Life.expectancy)) + 
   geom_boxplot( fill = "aquamarine4") +
   theme_minimal() +
@@ -78,7 +95,15 @@ summary(stepwise)
 
 
 
-
+test = glmulti(y = Life.expectancy ~ ., 
+        data = data, 
+        fitfunction = "glm", 
+        level = 1, 
+        method = "g", 
+        marginality = TRUE,
+        crit = "bic", 
+        conseq = 2,
+        family = gaussian())
 
 
 
