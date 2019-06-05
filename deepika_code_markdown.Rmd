@@ -1,0 +1,602 @@
+---
+title: "Analysing Life Expectancy With Linear Regression"
+author: "Rinku Bajaj (s3672522), Arion Barzoucas-Evans (s3650046), Deepika Joshi (s3672595)"
+date: "05/06/2019"
+output:
+  pdf_document:
+  df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80),tidy=TRUE,echo = TRUE)
+
+options(knitr.table.format = 'markdown')
+
+#Set working directory
+#setwd('C:/Users/deepi/Desktop/RMIT/Semester 4/Regression Analysis/Assignment 3')
+```
+
+\newpage
+
+\tableofcontents
+
+\newpage
+
+# Introduction \label{sec1}
+
+The main aim of this project is to identify the most influential factors affecting life expectancy in developed and developing countries from 2000-2015. The project considers factors traditionally studied for life expectancy predictions such as demographic variables, mortality rate and income composition as well as the effects of new factors such as immunization and human development index.
+The data is sourced from Kaggle Repository and is a combination of life-expectancy and health data from Global Health Observatory (GHO) published by World Health Organisation (WHO) and economic data published by United Nations. It consists of data spanning over 15 years from 2000-2015 for 193 countries and can be broadly divided into Economic Factors, Social Factors, Immunization Factors and Mortality Factors. The dataset has 2938 observations for 20 predictor variables describing the life expectancy of each nation for that year.
+
+Linear regression models will be used to predict the life expectancy based on the variables present in the data. This analysis will help in determining the influential factors different than those traditionally used by implementing different methods involved in a regression analysis.
+
+\pagebreak
+
+
+# Data Pre-Processing and Data Exploration
+
+The first step after getting the data was data cleaning. Some basic cleaning steps were necessary like removing the NAs present in the data.
+
+```{r, warning=FALSE, message=FALSE}
+# load libraries
+library(ggplot2)
+library(data.table)
+library(knitr)
+library(corrplot)
+library(car)
+library(TSA)
+library(leaps)
+```
+
+```{r}
+# read data
+data = setDT(read.csv("Life Expectancy Data.csv"))
+
+# replace/remove NAs
+data = data[!is.na(Life.expectancy)]
+cols = names(data)[!grepl("Country|Status", names(data))]
+data[, (cols) := lapply(.SD, function(x) {ifelse(is.na(x), -1, x)}), .SDcols = cols]
+
+```
+
+Data exploration was implemented by means of various visualisations which gave insights into the data and made next steps clearer.
+
+Figure \ref{fig:corrplot} shows the correlation between the numeric variables in the dataset. According to this, life expectancy has a high negative correlation with adult mortality, HIV, and thinness. Conversely, there is a high positive correlation between life expectancy and BMI, schooling, polio, Diphtheria, and GDP. Additionally, many of the independent variables are correlated to each other and may lead to multi-collinearity issues.
+
+Figure \ref{fig:LE_hist} displays the distribution of the life expectancy variable in the dataset. This shows that life expectancy ranges from around 40 to 90 years with 50% of the values being over 72 years. This indicates that the variable is slightly skewed to the left. The bar chart in Figure \ref{fig:status_bar} shows that the majority of countries in the dataset are developing countries with only around 30 countries being developed.
+
+```{r, fig.cap=paste("\\label{fig:corrplot}Correlation plot for all numeric variables in the dataset."), out.extra="", fig.height=6.5}
+# correlation plot
+corr = cor(data[, c(2,4:22)], use = "complete.obs")
+corrplot(corr, type = "lower")
+```
+
+
+```{r, fig.cap=paste("\\label{fig:LE_hist}Status distribution in the dataset."),out.extra=""}
+# life expectancy
+ggplot(data, aes(x = Life.expectancy)) +
+  geom_histogram(fill = "aquamarine4", colour = "white") +
+  geom_vline(xintercept = quantile(data$Life.expectancy, 0.5), 
+             linetype = "dashed", colour = "red", size = 1) +
+  annotate("text", x = quantile(data$Life.expectancy, 0.5) - 3, 
+           y = 400, label = "Median", colour = "red") +
+  theme_minimal() +
+  labs(x = "Life Expectancy", y = "Count", title = "Life expectancy distribution")
+```
+
+
+There will be differences in results based on the fact that whether the country is a developed or a developing one. Therefore, different statistics were observed across status of the countries.
+
+Life expectancy is strongly correlated to a country's status (Fig \ref{fig:LE_status_box}). It can be seen that developed countries generally have a life expectancy around 80 with little variation. On the other hand, developing countries have an average life expectancy of just under 70 with much greater variance and several outliers with life expectancy of around 40. Life expectancy for both developed and developing countries has an upward trend having a 5 year improvement from 2000 to 2015 (Fig \ref{fig:LE_status_ts}). Figure \ref{fig:LE_status_mort} shows a strong negative correlation between life expectancy and adult mortality for both developed and developing countries. However, there are many cases of countries with a low adult mortality rate that still have low life expectancy. This may indicate that adult mortality alone is not a sufficient indicator of life expectancy.
+
+
+
+```{r, fig.cap=paste("\\label{fig:status_bar}Life expectancy distribution in the dataset."), fig.pos="h",out.extra=""}
+# status
+ggplot(data[, length(unique(Country)), Status], aes(x = Status, y = V1)) +
+  geom_bar(stat = "identity", fill = "aquamarine4") +
+  theme_minimal() +
+  labs(y = "Countries", title = "Distribution of countries by status")
+```
+
+
+
+```{r, fig.cap=paste("\\label{fig:LE_status_box}Life expectancy by status."),out.extra=""}
+# status vs expectancy
+ggplot(data, aes(x = Status, y = Life.expectancy)) + 
+  geom_boxplot( fill = "aquamarine4") +
+  theme_minimal() +
+  labs(y = "Life Expectancy", title = "Life expectancy by country status")
+```
+
+```{r, fig.cap=paste("\\label{fig:LE_status_ts}Historical life expectancy by status."),out.extra=""}
+# timeseries by status
+ggplot(data[, mean(Life.expectancy, na.rm = T), .(Year, Status)], 
+       aes(x = Year, y = V1, colour = Status, group = Status)) + 
+  geom_point()+
+  geom_line() +
+  theme_minimal() +
+  labs(y = "Average Life Expectancy", 
+       title = "Life expectancy timeseries by country status",
+       x = "Year")
+```
+
+```{r, fig.cap=paste("\\label{fig:LE_status_mort}Life expectancy by adult mortality and status."),out.extra=""}
+# status & adult mortality
+ggplot(data, aes(x = Adult.Mortality, y = Life.expectancy, colour = Status)) + 
+  geom_point()+
+  theme_minimal() +
+  labs(y = "Life Expectancy", 
+       title = "Life Expectancy by Adult Mortality & Country Status",
+       x = "Adult Mortality")
+```
+
+\pagebreak
+
+\newpage
+
+# Methodology
+
+The countries present in the dataset will be categorised into developed and developing. Different linear regression models will be fitted to each group using the traditionally considered factors, the extended factors, and using stepwise regression. The adequacy of the fitted models will be assessed with a combination of residual diagnostics and statistical tests. Using the models with the best fit to the data, the most influential factors will be identified for both developed and developing countries.
+
+Splitting dataset into developed and developing nations
+```{r}
+#Create Developing and Developed Nations Datasets
+data_developing = subset(data,Status=="Developing")
+data_developed = subset(data,Status=="Developed")
+
+#Refactor the levels in the Dataset
+data_developing$Status <- NULL
+data_developed$Status <- NULL
+# Discussion
+
+```
+
+
+Creating a function for Regression Model Analysis
+
+```{r message=FALSE, warning=FALSE}
+regression.analysis <- function(regression_model){
+#regression_model = lm.fit_1
+
+#Residual check.options
+par(mfrow=c(2,2))
+plot(regression_model)
+
+# Evaluate homoscedasticity
+# non-constant error variance test
+cat("\nHomoskedascity Check:\n")
+print(ncvTest(regression_model))
+
+# Test for Autocorrelated Errors
+cat("\nAutoCorrelation Check:\n")
+print(durbinWatsonTest(regression_model))
+
+# Test for Normally Distributed Errors
+cat("\nNormality Check:\n")
+print(shapiro.test(regression_model$residuals))
+
+#Check multicollinearity
+cat("\nMulticollinearity Check:\n")
+kable(vif(lm.fit_1),col.names = "VIF")
+}
+```
+
+\newpage
+
+## Linear Regression for Developed Countries
+
+
+### Baseline Model
+First a baseline model is created for developed countries. This baseline model includes all features from the data. But on further processing it was observed that the feature for HIV AIDs when included in the model, produces NAs. Therefore, this feature was removed from the model. The variables Country and Year were excluded as well.
+
+From the summary of the model it can be seen that, 51.59% of the variation in life expectancy is explained by the features used in the model.
+Also, the p-value of the regression is very low and hence it can be concluded that the regression is significant.
+
+```{r}
+#Linear Regression Model
+lm.fit_1<-lm(Life.expectancy ~. -(Country + Year + HIV.AIDS), data_developed)
+summary(lm.fit_1)
+```
+
+
+Checking significance of regression co-efficients
+
+ANOVA test was performed to get significance of the model parameters. The hypotheses for this test are:
+$H_0: \beta_i = 0$
+$H_a: \beta_i \neq 0$
+where i runs from 1:17 and i represents each predictor.
+
+For this model it is observed that, at 95% significance level, estimates for adult mortality, infant deaths, alcohol, percentage expenditure, Hepatitis B, under five deaths, population and thinness 1-19 years are statistically significant, when used with all other predictors in the model.
+
+```{r}
+#Using ANOVA to check significance of variables
+anova(lm.fit_1)
+```
+
+
+Residual analysis for validating Model
+
+Here, the function created for residual analysis is used.
+
+
+```{r}
+regression.analysis(lm.fit_1)
+```
+
+1) residuals v/s fitted plot
+
+This plot is used for testing the linear approximation assumption.
+In this case, the residuals seem to be randomly distributed.
+
+2) QQ plot
+
+This plot is used to test the normality assumption. There seems to be deviation of the upper tail from the straight line.
+
+3) scale location plot
+
+This plot is used to check homoskedasticity. There is a horizontal line with randomly spaced points.
+
+4) residual v/s leverage plot
+
+This plot is used to find influential cases. Here, all the points are within cook’s distance.
+
+Homoskedasticity test:
+
+$H_0$: Errors have constant variance
+$H_a$: Errors have non-constant variance
+
+The nCV test has pvalue > 0.05. Therefore, we fail to reject the null hypothesis. So the constant error variance assumption is not violated.
+
+Test for autocorrelated errors:
+
+$H_0$: Errors are uncorrelated
+$H_1$: Errors are correlated
+
+p-value is > 0.05. So, we don't have enough evidence to reject $H_0$. Therefore, uncorrelated error assumption is not violated.
+
+Test for normality of residuals:
+  
+$H_0$: errors are normally distributed
+$H_a$: errors aren't normally distributed
+
+p-value < 0.05. Therefore, we reject the null hypothesis. This indicates that the normality assumption is violated.
+
+Test for multicollinearity:
+
+Very high values of VIF indicate strong correlation. Hence, it can be said that infant death and under five deaths are highly correlated.
+Also, 'thinness 1-19 yrs' and 'thinness 5-9 yrs' are correlated.
+
+Some assumptions are violated. Some sort of non-linear transformations can be applied on the data to fix this.
+
+### Model Building Comparison using AIC Values
+
+
+Model building comparison for backward elimination, forward selection and stepwise regression using AIC values
+
+In forward selection, initially there are no variables and then variables are added one at a time. Based on AIC value, the best model is selected.
+In case of backward elimination, a full model (model with all features included) is created and then variables are examined and removed sequentially. 
+Stepwise is a combination of both forward selection and backward elimination. Here contribution of each feature is checked using partial F test.
+Akaike Information Criteria (AIC) penalises based on the number of parameters in the model. Smaller value of AIC is desirable.
+
+The coefficients of the parameters for the best model selected using backward elimination are:
+
+```{r}
+#Backward Elimination
+b1 = step(lm.fit_1, data=data_developed, direction="backward", trace = FALSE)
+
+kable(b1$coefficients, col.names = "Backward Elimination Parameter Estimates")
+```
+
+The coefficients of the parameters for the best model selected using forward selection are:
+
+```{r}
+# null model contains no variable
+null_data1 =lm(Life.expectancy~1, data=data_developed)
+
+#forward selection using AIC values
+f1 = step(null_data1, scope=list(lower=null_data1, upper=lm.fit_1), direction="forward", trace = FALSE)
+kable(f1$coefficients, col.names = "Forward Selection Parameter Estimates")
+```
+
+The coefficients of the parameters for the best model selected using stepwise regression are:
+
+```{r}
+#stepwise regression using AIC values
+s1 = step(null_data1, scope = list(upper=lm.fit_1), data=data_developed, direction="both", trace = FALSE)
+kable(s1$coefficients, col.names = "Stepwise Regression Parameter Estimates")
+```
+
+Model parameters differ a bit based on the chosen method. Features like adult mortality, alcohol, diphtheria, infant deaths, percentage expenditure, BMI, under 5 deaths are significant across all the 3 methods.
+
+### Model Building using R Squared Values
+
+Here, best model is determined by using adjusted r2 as the selection criteria. Model with the highest adjusted R2 value is chosen. Also, adjusted R2 is always a better metric to compare models instead of R2.
+
+Using 'regsubsets' function to determine the best subset model.
+```{r}
+new_model_developed <- regsubsets(Life.expectancy ~. -(Country + Year + HIV.AIDS), data = data_developed)
+nm1 = summary(new_model_developed)
+nm1
+```
+
+
+Selecting the best subset model based on highest Adjusted $R^2$ value
+
+```{r}
+adjr2_developed = which.max(nm1$adjr2)
+adjr2_developed
+```
+
+The model with the highest adjusted R2 value has adult mortality, infant deaths, alcohol, percentage expenditure, BMI, under five deaths, diphtheria, thinness 1-19 in it.
+
+
+\newpage
+
+## Linear Regression for Developing Countries - Baseline Model
+
+
+### Baseline Model
+LM Model and Summary
+
+The exact same procedure is followed for developing countries as well.
+First, baseline model with all the features included (except country and year) is built.
+Summary of the model shows that regression is significant as p-value is very small. Adjusted R2 shows that this baseline model is able to explain 76.8% variability in life expectancy using the predictors in the model.
+
+```{r}
+#Linear Regression Model
+lm.fit_2<-lm(Life.expectancy ~. -(Country + Year), data_developing)
+summary(lm.fit_2)
+```
+
+
+Checking significance of regression co-efficients
+
+ANOVA test is used to check significance of model parameters.
+It is observed that at 5% significance level, except features like GDP, Population and thinness 5-9 years, rest all the feature parameters are significant when considered with rest of the features.
+
+```{r}
+  #Using ANOVA to check significance of variables
+anova(lm.fit_2)
+```
+
+
+Residual analysis for validating Model
+
+
+```{r}
+regression.analysis(lm.fit_2)
+```
+
+1) residuals v/s fitted plot
+
+The residuals seem to be randomly distributed.
+
+2) QQ plot
+
+There seems to be slight deviation from the straight line.
+
+3) scale location plot
+
+This plot is used to check homoskedasticity. There is a horizontal line with randomly spaced points.
+
+4) residual v/s leverage plot
+
+All the points are within cook’s distance.
+
+Homoskedasticity test:
+
+$H_0$: Errors have constant variance
+$H_a$: Errors have non-constant variance
+
+The nCV test has pvalue < 0.05. Therefore, reject the null hypothesis. So the constant error variance assumption is violated.
+
+Test for autocorrelated errors:
+
+$H_0$: Errors are uncorrelated
+$H_1$: Errors are correlated
+
+p-value is > 0.05. So, we don't have enough evidence to reject $H_0$. Therefore, uncorrelated error assumption is not violated.
+
+Test for normality of residuals:
+  
+$H_0$: errors are normally distributed
+$H_a$: errors aren't normally distributed
+
+p-value < 0.05. Therefore, we reject the null hypothesis. This indicates that the normality assumption is violated.
+
+Test for multicollinearity:
+
+Very high values of VIF indicate strong correlation. Hence, it can be said that infant death and under five deaths are highly correlated.
+Also, 'income composition of resources' and 'schooling' are correlated.
+
+If needed, the models can be improved further using more complex methods to get fix the problem of assumptions being violated.
+
+### Model Building Comparison
+
+
+Best models based on AIC values from backward elimination, forward selection and stepwise regression are compared.
+
+
+```{r}
+#Backward Elimination
+b2 = step(lm.fit_2, 
+          data=data_developing, 
+          direction="backward", 
+          trace = FALSE)
+kable(b2$coefficients, col.names = "Backward Elimination Parameter Estimates")
+```
+
+```{r}
+# null model contains no variable
+null_data2 =lm(Life.expectancy~1, data=data_developing)
+
+#forward selection using AIC values
+f2 = step(null_data2, 
+          scope=list(lower=null_data2, upper=lm.fit_2), 
+          direction="forward", 
+          trace = FALSE)
+kable(f2$coefficients, col.names = "Forward Selection Parameter Estimates")
+```
+
+```{r}
+#stepwise regression using AIC values
+s2 = step(null_data2, 
+          scope = list(upper=lm.fit_2), 
+          data=data_developed, 
+          direction="both", 
+          trace = FALSE)
+kable(s2$coefficients, col.names = "Stepwise Regression Parameter Estimates")
+```
+
+Across all 3 methods, features like adult mortality, schooling, HIV AIDS, BMI, Diphtheria, percentage expenditure, income composition of resources, hepatitis B`, polio, thinness 1-19 years and total expenditure seem to be influential.
+
+### Model Building using R Squared Values
+
+
+Using 'regsubsets' function to determine the best subset model
+
+```{r}
+new_model_developing <- regsubsets(Life.expectancy ~. -(Country + Year), 
+                                   data = data_developing)
+nm2 = summary(new_model_developing)
+nm2
+```
+
+
+Selecting the best subset model based on highest Adjusted $R^2$ value
+
+The model with highest R2 has parameters like schooling, HIV AIDS, Diphtheria, under five deaths, BMI, percentage expenditure, infant deaths, adult mortality.
+
+```{r}
+adjr2_developing = which.max(nm2$adjr2)
+adjr2_developing
+```
+
+
+\newpage
+
+# Results
+
+
+## For developed nations
+  
+  
+Traditionally, features like demographic values like population, mortality rates and income compositions are the only factors considered influential for life expectancy. This analysis shows that along with these 3 factors, there are other factors that are influential as well in determining life expectancy of a country. This result for observed for both developed as well as developing nations.
+
+Model is built with only those factors considered influential traditionally. The summary of the model shows that even though the regression is significant, it is able to explain just 25% variability in life expectancy.
+
+
+Model with only traditional variables (Developed Country):
+```{r}
+traditional_developed <- lm(Life.expectancy ~ Adult.Mortality + Population 
+                            + Income.composition.of.resources, 
+                            data = data_developed)
+summary(traditional_developed)
+```
+
+
+
+Then, using features found to be significant using all the above methods, model is built and from its summary it can be clearly seen that including variables other than the traditionally chosen ones, the results are far better. The new model is able to explain 51% of the variation in life expectancy. This value is exactly double of the traditional method model.
+Including features like infant deaths, alcohol, percentage expenditure, BMI, under five deaths, Diphtheria, thinness has improved the model significantly.
+
+
+Model with highest $R^2$ analysis:
+```{r}
+final_developed <- lm(Life.expectancy ~ Adult.Mortality + infant.deaths 
+                      + Alcohol + percentage.expenditure
+                      +BMI + under.five.deaths
+                      +Diphtheria + thinness..1.19.years,
+                      data= data_developed)
+summary(final_developed)
+```
+
+
+## For developing nations
+
+The model built with just the features from the traditional approach like mortality, population and income composition is able to explain just 50% of the variability in life expectancy.
+
+Model with only traditional variables (Developing Country):
+```{r}
+traditional_developing <- lm(Life.expectancy ~ Adult.Mortality + Population 
+                            + Income.composition.of.resources, 
+                            data = data_developing)
+summary(traditional_developing)
+```
+
+
+When additional predictors like infant.deaths, percentage.expenditure, Schooling, BMI, under.five.deaths, Diphtheria and HIV.AIDS were included in the model, the results improve significantly. This new model is able to explain 75% of the variability. This is huge improvement over the traditional approach. Therefore, this is an indication of a good model.
+
+Model with highest $R^2$ analysis (Developing Country):
+```{r}
+final_developing <- lm(Life.expectancy ~ Adult.Mortality + infant.deaths 
+                      + percentage.expenditure + Schooling
+                      + BMI + under.five.deaths
+                      + Diphtheria + HIV.AIDS,
+                      data= data_developing)
+summary(final_developing)
+```
+
+\newpage
+
+## Factors affecting Life Expectancy
+
+The influential factors in determining the life expectancy in developed nations are:
+
+1. Adult Mortality
+2. Infant Deaths
+3. Alcohol
+4. Percentage expenditure - percentage expenditure on health as percent of GDP
+5. BMI
+6. Under five deaths
+7. Diphtheria - Percentage of Diphtheria immunization coverage among 1 year-olds
+8. thinness 1-19 years
+
+The linear regression model used to predict life expectancy for developed nations is:
+
+Life expectancy = 8.463 - 0.0167 Adult.mortality - 1.364 infant.deaths - 0.273 Alcohol + 0.001967 percentage.expenditure - 0.01872 BMI
+- 1.094 under.five.deaths + 0.02267 Diphtheria - 2.423 thinness.1.19.years
+
+Similarly, influential factors in case of developing nations are:
+
+1. Adult Mortality
+2. Infant Deaths
+3. Percentage expenditure - percentage expenditure on health as percent of GDP
+4. Schooling
+5. BMI
+6. Under five deaths
+7. Diphtheria - Percentage of Diphtheria immunization coverage among 1 year olds
+8. thinness 1-19 years
+
+The linear regression model used to predict life expectancy for developing nations is:
+
+Life expectancy = 58.95 - 0.019 Adult.mortality - 0.1168 infant.deaths + 0.0012 percentage.expenditure - 0.01872 BMI + 0.4894 Schooling
++ 0.85 BMI - 0.008 under.five.deaths+ 0.0543 Diphtheria - 0.0501 thinness.1.19.years
+
+Therefore, new predictors that improved model efficiency common across both types of countries are infant deaths, percentage expenditure, BMI, under five deaths, Diphtheria and thinness 1-19 years.
+
+## Impact of Healthcare Expenditure on Life Expectancy
+Healthcare expenditure has an impact on life expectancy. The positive coefficient implies healthcare expenditure has a positive relationship with life expectancy. Therefore, as expenditure on healthcare increases, life expectancy of that country increases. This is true for both developed and developing nations.
+
+## Impact of Alcohol Consumption on Life Expectancy
+An interesting observation was made when it comes to alcohol consumption. This is a predictor only for developed nations and not for developing nations. It has a negative relation with life expectancy.
+
+## Impact of Immunization Coverage on Life Expectancy
+Positive regression coefficient for Diphtheria immunization coverage implies positive relation between immunization coverage and life expectancy. So as immunization increases life expectancy increases as well.
+
+\newpage
+
+# Conclusion
+
+Life expectancy of a country can be determined using various features other than those used traditionally. It was observed that model built using just the traditional predictors was resulting in a weak model which was able to account for just 25% (for developed nations) or 50% (for developing nations) of the variability in life expectancy. But the model improved significantly when other features like healthcare expenditure, alcohol consumption, immunization coverage where included as predictors.
+
+Both healthcare spend and immunization of children have positive relation with life expectancy. Logically, this relationship makes perfect sense as well. If a country has better vaccination rates and higher spend on healthcare, people will be immune against variety of diseases and they also will be privy to good health care facilities thus resulting in increased life expectancy.
+
+In developed nations, alcohol consumption has negative impact on life expectancy. Logically speaking, heavy alcohol consumption leads to various ailments some of which result in pre-mature deaths, can also result in accidents and so on. Therefore, results from the model make sense.
+
+Multiple linear regression model was satisfactorily able to explain influential factors for life expectancy.
+
+
+
+
+
+
