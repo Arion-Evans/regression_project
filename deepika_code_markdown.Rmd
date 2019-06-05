@@ -8,7 +8,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80),tidy=TRUE,echo = TRUE)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80),tidy=FALSE,echo = TRUE)
 
 options(knitr.table.format = 'markdown')
 
@@ -71,7 +71,7 @@ corrplot(corr, type = "lower")
 ```
 
 
-```{r, fig.cap=paste("\\label{fig:LE_hist}Status distribution in the dataset."),out.extra=""}
+```{r, fig.cap=paste("\\label{fig:LE_hist}Status distribution in the dataset."),out.extra="", message=FALSE, warning=FALSE}
 # life expectancy
 ggplot(data, aes(x = Life.expectancy)) +
   geom_histogram(fill = "aquamarine4", colour = "white") +
@@ -154,7 +154,7 @@ data_developed$Status <- NULL
 
 Creating a function for Regression Model Analysis
 
-```{r message=FALSE, warning=FALSE}
+```{r, message=FALSE, warning=FALSE}
 regression.analysis <- function(regression_model){
 #regression_model = lm.fit_1
 
@@ -294,7 +294,8 @@ The coefficients of the parameters for the best model selected using forward sel
 null_data1 =lm(Life.expectancy~1, data=data_developed)
 
 #forward selection using AIC values
-f1 = step(null_data1, scope=list(lower=null_data1, upper=lm.fit_1), direction="forward", trace = FALSE)
+f1 = step(null_data1, scope=list(lower=null_data1, upper=lm.fit_1), 
+          direction="forward", trace = FALSE)
 kable(f1$coefficients, col.names = "Forward Selection Parameter Estimates")
 ```
 
@@ -302,7 +303,8 @@ The coefficients of the parameters for the best model selected using stepwise re
 
 ```{r}
 #stepwise regression using AIC values
-s1 = step(null_data1, scope = list(upper=lm.fit_1), data=data_developed, direction="both", trace = FALSE)
+s1 = step(null_data1, scope = list(upper=lm.fit_1), data=data_developed, 
+          direction="both", trace = FALSE)
 kable(s1$coefficients, col.names = "Stepwise Regression Parameter Estimates")
 ```
 
@@ -314,7 +316,8 @@ Here, best model is determined by using adjusted r2 as the selection criteria. M
 
 Using 'regsubsets' function to determine the best subset model.
 ```{r}
-new_model_developed <- regsubsets(Life.expectancy ~. -(Country + Year + HIV.AIDS), data = data_developed)
+new_model_developed <- regsubsets(Life.expectancy ~. -(Country + Year + HIV.AIDS), 
+                                  data = data_developed)
 nm1 = summary(new_model_developed)
 nm1
 ```
@@ -449,6 +452,8 @@ kable(s2$coefficients, col.names = "Stepwise Regression Parameter Estimates")
 ```
 
 Across all 3 methods, features like adult mortality, schooling, HIV AIDS, BMI, Diphtheria, percentage expenditure, income composition of resources, hepatitis B`, polio, thinness 1-19 years and total expenditure seem to be influential.
+
+\newpage
 
 ### Model Building using R Squared Values
 
